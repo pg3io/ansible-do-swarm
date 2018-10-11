@@ -1,0 +1,8 @@
+#do_token: <DO_TOKEN>
+droplets:
+  - droplet-one
+  - droplet-two
+  - droplet-tree
+do_region: tor1
+do_size: s-1vcpu-1gb
+ssh_pubkey: "[?name=='my_ssh_key']"

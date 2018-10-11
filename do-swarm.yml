@@ -1,0 +1,85 @@
+---
+- hosts: digitalocean
+
+  tasks:
+  - name: include vars
+    include_vars:
+      file: vars.yml
+      name: global
+
+  - digital_ocean_sshkey_facts:
+      oauth_token: "{{ do_token }}"
+
+  - set_fact:
+      pubkey: "{{ item.id }}"
+    with_items: "{{ ssh_keys|json_query(global.ssh_pubkey) }}"
+
+  - name: create droplet 
+    digital_ocean: >
+      state=present
+      command=droplet
+      name={{ item }}
+      size_id={{ global.do_size }}
+      unique_name=yes
+      region_id={{ global.do_region }}
+      image_id=docker-18-04
+      ssh_key_ids={{ pubkey }}
+      api_token={{ do_token }}
+    with_items: "{{ global.droplets }}"
+    register: droplet_details
+
+  - name: gen inventory worker
+    add_host: name={{ item.droplet.name }} ansible_host={{ item.droplet.ip_address }} ansible_user=root groups=do
+    with_items: "{{ droplet_details.results }}"
+
+  - name: before actions to hosts
+    pause: seconds="30"
+    when: droplet_details.changed
+
+################################
+
+- hosts: do
+  gather_facts: False
+
+  tasks:
+  - name: include vars
+    include_vars:
+      file: vars.yml
+      name: global
+
+  - name: install python
+    raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal python-apt)
+
+  - name: install packages base 
+    apt: name={{ packages }} state=present
+    vars:
+      packages:
+      - python-pip
+
+  - name: install docker py
+    pip: name=docker state=present version=2.6
+
+  - name: delete rules docker ufw
+    ufw: rule=allow port={{ item }} proto=tcp delete=yes
+    with_items:
+      - 2375
+      - 2376
+
+  - name: open firewall ufw for cluster
+    ufw: rule=allow src={{ hostvars[item]['ansible_host'] }}
+    with_inventory_hostnames:
+      - do
+    when: inventory_hostname != "hostvars[item]['name']"
+
+  - name: init swarm
+    docker_swarm: state=present advertise_addr="{{ ansible_host }}"
+    when: inventory_hostname == global.droplets[0]
+    register: swarm_info
+
+  - name: add nodes
+    docker_swarm:
+      state: join
+      advertise_addr: "{{ ansible_host }}"
+      join_token: "{{ hostvars[global.droplets[0]].swarm_info.swarm_facts.JoinTokens.Worker }}"
+      remote_addrs: [ "{{ hostvars[global.droplets[0]].ansible_host }}:2377" ]
+    when: inventory_hostname != global.droplets[0]
