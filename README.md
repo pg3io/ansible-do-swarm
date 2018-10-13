@@ -8,7 +8,7 @@ Playbook Ansible to install a Docker Swarm cluster at Digital Ocean
 * Ansible 2.7
 
 ```
-npm install ansible@2.7
+pip install ansible==2.7
 ```
 
 # Playbook Variables
